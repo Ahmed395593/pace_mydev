@@ -26,6 +26,10 @@ initialt=$(targetcli ls)
 echo hhhhhhhhhhhhhhhhhhh
 initialtarget=`echo $initialt | wc -l`
 myip=`docker exec etcdclient /TopStor/etcdgetlocal.py clusternodeip`
+if [ -z "$myip" ]; then
+	echo "myip is empty (etcdclient not ready yet) - skipping this run to avoid corrupting the target config"
+	exit 0
+fi
 mycluster=`nmcli conn show mycluster | grep ipv4.addresses | awk '{print $2}' | awk -F'/' '{print $1}'`
 declare -a iscsitargets=(`docker exec etcdclient /pace/iscsiclients.py $etcdip | grep target | awk -F'/' '{print $2}'`);
 #currentdisks=$(echo "$initialt" | awk '/o- iscsi/{flag=1} flag; /o- loopback/{flag=0}')
@@ -86,12 +90,14 @@ fi
 # check if my ip was changed so I have a wrong tpg1, of it my tpg was not created before. so I create the write tpg 
 echo "$currentdisks" | grep $myip:3266 &>/dev/null
 if [ $? -ne 0 ]; then
- targetcli iscsi/iqn.2016-03.com.${myhost}:t1/tpg1/portals delete 0.0.0.0 3260
- targetcli iscsi/iqn.2016-03.com.${myhost}:t1/tpg1/portals ls | grep 3266 | awk -F'o-' '{print $2}' | awk -F':' '{print $1}'
- oldip=`targetcli iscsi/iqn.2016-03.com.${myhost}:t1/tpg1/portals ls | grep 3266 | awk -F'o-' '{print $2}' | awk -F':' '{print $1}'`
- targetcli iscsi/iqn.2016-03.com.${myhost}:t1/tpg1/portals delete $oldip 3260
- echo oldip=$oldip
- #targetcli iscsi/iqn.2016-03.com.${myhost}:t1/tpg1/portals delete$olidp 3266
+ existing_portals=$(targetcli iscsi/iqn.2016-03.com.${myhost}:t1/tpg1/portals ls 2>/dev/null | grep -oP '\d+\.\d+\.\d+\.\d+:\d+')
+ for p in $existing_portals; do
+  pip=${p%%:*}
+  pport=${p##*:}
+  if [ "$p" != "${myip}:3266" ]; then
+   targetcli iscsi/iqn.2016-03.com.${myhost}:t1/tpg1/portals delete $pip $pport 2>/dev/null
+  fi
+ done
  targetcli iscsi/iqn.2016-03.com.$myhost:t1/tpg1/portals create $myip 3266
  flag=1
 else
@@ -165,7 +171,7 @@ done
 targetcli /iscsi/iqn.2016-03.com.${myhost}:t1 set global auto_add_mapped_luns=false
 
 #echo hi9 >> /root/targetadd
-#targetcli saveconfig
+targetcli saveconfig
 #exit
 #endingtarget=`targetcli ls | wc -l`
 #if [[ $initialtarget != $endingtarget ]];
