@@ -110,7 +110,7 @@ def hostlost(host, hostip):
                         print('chceking new leader')
                         cmdline='nmap --max-rtt-timeout 500ms -n -p '+port+' '+leaderip 
                         result=subprocess.check_output(cmdline.split(),stderr=subprocess.STDOUT).decode('utf-8')
-                        if ('Host is up' or 'open' ) in result:
+                        if '/tcp open' in result:
                             result = (host,'ok')
                         else:
                             result = (host,'lost')
@@ -126,6 +126,45 @@ def hostlost(host, hostip):
                 dels(etcd, 'known/',host)
                 dels(etcd, 'vol',host)
                 dels(etcd, 'sync/hostdown',host)
+
+# QCFIX: re-register this node on the leader when its ready/<host> key was lost, and announce the cluster ip
+def selfregister():
+    global leader, leaderip, myhost, myhostip
+    if not myhost or myhost == leader or not leaderip:
+        return
+    try:
+        active = str(get(leaderip, 'ActivePartners/' + myhost))
+        ready = str(get(leaderip, 'ready/' + myhost))
+    except Exception:
+        return
+    if myhost not in active or myhost in ready:
+        return
+    stampit = str(stamp())
+    put(leaderip, 'ready/' + myhost, myhostip)
+    put(leaderip, 'sync/ready/Add_' + myhost + '_' + myhostip + '/request', 'ready_' + stampit)
+    put(leaderip, 'sync/ready/Add_' + myhost + '_' + myhostip + '/request/' + leader, 'ready_' + stampit)
+    with open('/root/heartproblem', 'a') as f:
+        f.write('\nselfregister: ready/' + myhost + ' was missing on ' + leaderip + ', written again\n')
+
+
+def announceclusterip():
+    global leader, myhost, leaderip
+    if myhost != leader or not leaderip:
+        return
+    try:
+        out = subprocess.check_output(['ip', '-o', '-4', 'route', 'show', 'to', 'match', leaderip], stderr=subprocess.DEVNULL).decode()
+    except Exception:
+        return
+    devs = set()
+    for line in out.splitlines():
+        if line.startswith('default'):
+            continue
+        if ' dev ' in line:
+            devs.add(line.split(' dev ')[1].split()[0])
+    for dev_ in devs:
+        subprocess.call(['arping', '-U', '-c', '1', '-I', dev_, '-s', leaderip, leaderip],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 
 def heartbeat(*args):
     global etcd, leader ,leaderip, myhost, myhostip
@@ -145,9 +184,15 @@ def heartbeat(*args):
     else:
         etcd = myhostip
     nextleader, nextleaderip = getnextlead()
+    loopcount = 0
     while True:
         print('looping')
         sleep(1)
+        loopcount += 1
+        if loopcount % 15 == 0:
+            selfregister()
+        if loopcount % 20 == 0:
+            announceclusterip()
         tries = 0
         while tries < 8:
             knowns = get(etcd, 'ready','--prefix')
@@ -174,14 +219,15 @@ def heartbeat(*args):
             print('nmapping')
             result = 'failed'
             tries = 0
-            while tries < 2:
+            res = ''
+            while tries < 5:
                 tries +=1
                 try:
                     cmdline='nmap --max-rtt-timeout 500ms -n -p '+port+' '+hostip 
                     res=subprocess.check_output(cmdline.split(),stderr=subprocess.STDOUT).decode('utf-8')
                 except:
                     result=(host,'doubt')
-                if ('Host is up' or 'open' ) in res:
+                if '/tcp open' in res:
                     result = (host,'ok')
                 else:
                     result = (host,'doubt')
@@ -195,7 +241,7 @@ def heartbeat(*args):
                         result=(host,'lost')
                 if 'ok' in str(result):
                     break
-                sleep(1)
+                sleep(2)
             print(result)
             if 'ok' not in str(result):
                 with open('/root/heartproblem','a') as f:

@@ -36,6 +36,10 @@ echo bootdisk is $bootdisk
 cd /pace
 etcdip=`echo $@ | awk '{print $1}'`
 myhost=`echo $@ | awk '{print $2}'`
+# QCFIX: an unresolved host name ('_1' or empty) created sdX-_1 backstores that blocked the real ones
+case "$myhost" in
+  ''|_1|None) echo "caddtargetdisks: host name not resolved ('$myhost'), leaving LIO alone"; exit 0;;
+esac
 actives=`/pace/etcdget.py $etcdip Active --prefix`
 change=0
 #echo hi1 $myhost>> /root/targetadd
