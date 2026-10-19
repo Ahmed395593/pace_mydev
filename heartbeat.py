@@ -13,6 +13,17 @@ dev = 'enp0s8'
 os.environ['ETCDCTL_API']= '3'
 
 
+# QCFIX2: a plain TCP connect says whether etcd answers; nmap against the node's own cluster ip goes through the
+# router's proxy ARP and reports the port 'filtered' (so the take-over clean-up waited its full 300 s)
+def portopen(ip, port=2379, timeout=2):
+    import socket
+    try:
+        socket.create_connection((ip, int(port)), timeout).close()
+        return True
+    except Exception:
+        return False
+
+
 def dosync(*args):
   global etcd, leader ,leaderip, myhost, myhostip, nextleader, nextleaderip
   put(leaderip, *args)
@@ -110,7 +121,7 @@ def hostlost(host, hostip):
                         print('chceking new leader')
                         cmdline='nmap --max-rtt-timeout 500ms -n -p '+port+' '+leaderip 
                         result=subprocess.check_output(cmdline.split(),stderr=subprocess.STDOUT).decode('utf-8')
-                        if '/tcp open' in result:
+                        if portopen(leaderip, port):
                             result = (host,'ok')
                         else:
                             result = (host,'lost')
@@ -227,7 +238,7 @@ def heartbeat(*args):
                     res=subprocess.check_output(cmdline.split(),stderr=subprocess.STDOUT).decode('utf-8')
                 except:
                     result=(host,'doubt')
-                if '/tcp open' in res:
+                if portopen(hostip, port):
                     result = (host,'ok')
                 else:
                     result = (host,'doubt')

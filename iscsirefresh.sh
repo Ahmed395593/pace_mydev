@@ -18,6 +18,22 @@ sessions=`/sbin/iscsiadm -m session 2>/dev/null`
 #mycluster=`nmcli conn show mycluster | grep ipv4.addresses | awk '{print $2}' | awk -F'/' '{print $1}'`
 nodes=(`docker exec etcdclient /TopStor/etcdget.py $etcdip ready --prefix | awk -F"', " '{print $2}' | awk -F"'" '{print $2}'`)
 #nodes=(`docker exec etcdclient /TopStor/etcdgetlocal.py ready --prefix | awk -F'Partners/' '{print $2}' | awk -F"'" '{print $1}'`)
+# QCFIX2: log out of sessions to an address that is no longer a ready node AND does not answer (the node's old ip
+# after an ip change).  A live portal (also this node's own loopback session) is never touched; an empty node list
+# (etcd not readable) does nothing.
+if [ ${#nodes[@]} -gt 0 ]; then
+ for p in `echo "$sessions" | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*:3266' | sort -u`; do
+  pip=${p%%:*}
+  echo " ${nodes[@]} " | grep -q " $pip " && continue
+  timeout 3 bash -c "echo > /dev/tcp/$pip/3266" 2>/dev/null && continue
+  for iqn in `echo "$sessions" | grep -F "$p" | grep -o 'iqn[^ ]*' | sort -u`; do
+   echo "QCFIX2 stale portal $p ($iqn) is not a ready node and does not answer: logging out"
+   /sbin/iscsiadm -m node --targetname $iqn --portal $p -u
+   /sbin/iscsiadm -m node --targetname $iqn --portal $p -o delete
+  done
+ done
+ sessions=`/sbin/iscsiadm -m session 2>/dev/null`
+fi
 for host in "${nodes[@]}" ; do
  # QSD5.294: match the portal AND the node's current IQN. A stale session of the
  # same portal with an old IQN (node re-created with the same IP) used to make
