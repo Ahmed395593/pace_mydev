@@ -55,5 +55,11 @@ for host in "${nodes[@]}" ; do
   echo stale session $old on ${host}:3266, logging out
   /sbin/iscsiadm -m node --targetname $old --portal ${host}:3266 -u
  done
- [ -n "$hostiqn" ] && /sbin/iscsiadm -m node --targetname $hostiqn --portal ${host}:3266 -l
+ if [ -n "$hostiqn" ]; then
+  # Discovery can fail to store the node record (an old or odd record in /var/lib/iscsi blocks its update: 'Could not stat
+  # ... to delete node'), and then '-l' answers 'No records found' for ever: the node has NO disk session, not even to its own
+  # target, sees none of the pool disks and can never take a pool over.  Create the record ourselves (harmless if it exists).
+  /sbin/iscsiadm -m node --targetname $hostiqn --portal ${host}:3266 -o new >/dev/null 2>&1
+  /sbin/iscsiadm -m node --targetname $hostiqn --portal ${host}:3266 -l
+ fi
 done
