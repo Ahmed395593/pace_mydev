@@ -57,7 +57,8 @@ attempt_volume_deletion() {
 
 entry=$(/pace/etcdget.py $leaderip cVolToDelete/$myhost)
 
-if [[ "$entry" == "_1" || -z "$entry" ]]; then
+# a real entry is "<pool>|<volume>|<user>|<script>"; etcdget answers "not reachable"/"no reachable" while the leader is changing
+if [[ "$entry" == "_1" || -z "$entry" || "$entry" != *"|"* ]]; then
     exit 0
 fi
 
