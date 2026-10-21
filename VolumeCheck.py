@@ -248,6 +248,61 @@ def cleanfailed(dockers):
             cmdline = 'docker rm -f '+ dom[1]
             result = subprocess.run(cmdline.split(),stdout=subprocess.PIPE).stdout.decode('utf-8')
     
+def staleips(etcds):
+ # The address of a volume (CIFS/NFS/iSCSI/HOME) is put on this node's bond when it serves the volume.  A node that does not
+ # serve it any more (the other node took the pool over while this one was down, or the volume/pool was deleted on the other
+ # node) kept the address, answered ARP and refused the clients' connections for an address another node serves, until
+ # somebody removed it by hand.  An address that a volume record carries and whose dataset is NOT on this node is removed,
+ # after it has been seen like that for 30 s (a pool that is being imported must not lose its address).
+ import json, re, time as _t
+ state_file = '/tmp/staleips.json'
+ try:
+  recs = [(str(k), str(v)) for k, v in etcds]
+ except Exception:
+  return
+ if not recs:
+  return                                   # no volume records (etcd not readable?): change nothing
+ try:
+  out = subprocess.run(['ip','-4','-o','addr','show','dev','bond0'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL).stdout.decode('utf-8')
+  z = subprocess.run(['/sbin/zfs','list','-H','-o','name'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+ except Exception:
+  return
+ if z.returncode != 0:
+  return
+ datasets = set(z.stdout.decode('utf-8').split())
+ try:
+  with open(state_file) as f:
+   seen = json.load(f)
+ except Exception:
+  seen = {}
+ now = int(_t.time())
+ newseen = {}
+ for ip, prefix in re.findall(r'inet (\d+\.\d+\.\d+\.\d+)/(\d+)', out):
+  if ip in (myhostip, leaderip):
+   continue
+  matching = [(k, v) for k, v in recs if ip in v.split('/')]
+  if not matching:
+   continue                                # not a volume address
+  served = False
+  for k, v in matching:
+   parts = k.split('/')
+   if len(parts) >= 5 and parts[3]+'/'+parts[4] in datasets:
+    served = True
+  if served:
+   continue
+  first = seen.get(ip, now)
+  newseen[ip] = first
+  if now - first >= 30:
+   print('stale volume address', ip, 'is not served by this node: removing it')
+   subprocess.run(['ip','addr','del',ip+'/'+prefix,'dev','bond0'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+   subprocess.run(['nmcli','conn','mod','cmynode','-ipv4.addresses',ip+'/'+prefix],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+   newseen.pop(ip, None)
+ try:
+  with open(state_file,'w') as f:
+   json.dump(newseen, f)
+ except Exception:
+  pass
+
 def volumecheck(etcds, replis, *args):
  global leader, leaderip, myhost, myhostip, etcdip
  if str(etcds)=='init':
@@ -272,7 +327,7 @@ def volumecheck(etcds, replis, *args):
  print(etcds,'\n',dockers)
  inspectall(dockers)
  jobs = [lambda: nfsnew(etcds, replis, dockers), lambda: cifs(etcds, replis, dockers),
-         lambda: homes(etcds, replis, dockers), lambda: iscsi(etcds, replis)]
+         lambda: homes(etcds, replis, dockers), lambda: iscsi(etcds, replis), lambda: staleips(etcds)]
  def runjob(j):
      try:
          j()
