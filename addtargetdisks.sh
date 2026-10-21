@@ -2,6 +2,9 @@
 ######################
 #exit
 ##########################
+# same stable serial / product id as caddtargetdisks.sh: this script runs once at boot (diskref.sh) and used to create the backstores
+# with a random serial, so every disk got a new SCSI id after every reboot
+eval "$(sed -n '/^diskserial()/,/^}/p;/^setproduct()/,/^}/p' /pace/caddtargetdisks.sh)"
 stamp=`date +%s`
 echo $@ > /root/addtargets
 bootdisk='sda'
@@ -48,7 +51,8 @@ for ddisk in  "${disks[@]}"; do
 		ordinary=`lsscsi -i | grep -w $ddisk | grep -v LIO | awk '{print $NF}'`
 		#scsidisk=`ls -l /dev/disk/by-id/ | grep -w $ddisk | grep -v part | grep scsi | grep -v LIO | grep -v SLS | awk '{print $9}'`
 		scsidisk=`ls -l /dev/disk/by-id/ | grep -w $ddisk | grep -v part | grep scsi-$ordinary | awk '{print $9}'`
-  		targetcli backstores/block create ${ddisk}-${myhost} /dev/disk/by-id/$scsidisk
+  		targetcli backstores/block create name=${ddisk}-${myhost} dev=/dev/disk/by-id/$scsidisk wwn=`diskserial $ddisk`
+  		setproduct ${ddisk}-${myhost}
 		flag=1
 		
 	else
@@ -114,7 +118,8 @@ for ddisk in "${disks[@]}"; do
  echo $currentdisks | grep $devdisk-$myhost &>/dev/null
  if [ $? -ne 0 ]; then
   pdisk=`ls /dev/disk/by-id/ | grep $idisk | grep -v part | grep scsi | head -1`
-  targetcli backstores/block create ${devdisk}-${myhost} /dev/disk/by-id/$pdisk
+  targetcli backstores/block create name=${devdisk}-${myhost} dev=/dev/disk/by-id/$pdisk wwn=`diskserial $devdisk`
+  setproduct ${devdisk}-${myhost}
   flag=1
  else
   echo $devdisk-$myhost is already created in the backstores/block 
