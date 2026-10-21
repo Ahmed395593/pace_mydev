@@ -35,9 +35,17 @@ if [ $? -ne 0 ]; then
  targetcli iscsi/ create iqn.2016-03.com.${ipdom}:data &>/dev/null
 fi
 pdisk=`targetcli ls backstores/block`
-echo $pdisk | grep $disk 
-if [ $? -ne 0 ];
-then 
+# A zvol must not also be exported as a plain node disk (<disk>-<host>, made by caddtargetdisks.sh, which after a
+# reboot can run before this script).  Such a stray backstore keeps the device busy, so this volume's own backstore
+# could never be created and the target stayed without LUNs.  It holds no data of its own: remove it first.
+if echo "$pdisk" | grep -qE "o- ${disk}-${myhost} "; then
+ echo "removing stray disk-export backstore ${disk}-${myhost} of zvol $vol"
+ targetcli backstores/block delete ${disk}-${myhost}
+ pdisk=`targetcli ls backstores/block`
+fi
+# exact backstore name, not a substring (zd1 also matches zd16, zd0 matches zd0-<host>)
+if ! echo "$pdisk" | grep -qE "o- ${diskids} ";
+then
  targetcli backstores/block create $diskids /dev/$disk
  echo targetcli backstores/block create $diskids /dev/$disk
 fi
