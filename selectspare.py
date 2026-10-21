@@ -637,6 +637,14 @@ def spare2(*args):
         for disk in raid['disklist']:
             if 'dm-' not in disk['name'] and disk['changeop'] in ['ONLINE']:
                 diskwindow[disk['name']] = disk
+        # first time the group is seen complete and healthy: remember its size (see fastselect.optimizedisks)
+        try:
+            if get(leaderip, 'vdevmin/'+raid['pool'])[0] == '_1' and raid['status'] == 'ONLINE' \
+               and all(d['changeop'] == 'ONLINE' and 'dm-' not in d['name'] for d in raid['disklist']):
+                put(leaderip, 'vdevmin/'+raid['pool'], str(min(norm(d['size']) for d in raid['disklist'])))
+                dosync('sync/vdevmin/Add_vdevmin_'+raid['pool']+'/request', 'vdevmin_'+str(stamp()))
+        except Exception as e:
+            print('vdevmin not recorded', e)
         print('##################################################')
         print('optimizing raid:',raid['name'])
         print('its disks:',[x['name'] for x in raid['disklist']])

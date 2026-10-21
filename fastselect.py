@@ -108,6 +108,13 @@ def optimizedisks(leaderip, fraid, fdisksinfo,excludelst=''):
         f.write(str(fraid)+'\n'+str(fdisksinfo)+'\n')
     count = len(raid['disklist'])
     mindisksize = min([ norm(x['size']) for x in raid['disklist'] if x['changeop'] in ['ONLINE']])
+    # the vdev keeps the size it was created with (autoexpand=off): a disk of that size can come back into the group, even if the
+    # members now online are all larger (a node died and the group was rebuilt with the larger disks of the other node)
+    try:
+        vdevmin = float(get(leaderip, 'vdevmin/'+raid['pool'])[0])
+        mindisksize = min(mindisksize, vdevmin)
+    except Exception:
+        pass
     for disk in raid['disklist']:
         if 'dm-' in disk['name']:
             continue

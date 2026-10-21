@@ -5,7 +5,19 @@
 # disks over.  For a loop device the identity is its backing file; otherwise the device name.
 diskserial() {
 	ident=`losetup -n -O BACK-FILE /dev/$1 2>/dev/null | tr -d ' '`
-	[ -z "$ident" ] && ident=$1
+	if [ -z "$ident" ]; then
+		# the kernel name (sda, sdb ..) changes at every boot, and with it the SCSI id the other node and the pool see.
+		# Use what belongs to the DISK: its serial/WWN and the bus path (cheap disks share the same serial text, the path separates them)
+		props=`udevadm info -q property -n /dev/$1 2>/dev/null`
+		dserial=`echo "$props" | sed -n 's/^ID_SERIAL=//p' | head -1`
+		dwwn=`echo "$props" | sed -n 's/^ID_WWN=//p' | head -1`
+		dpath=`echo "$props" | sed -n 's/^ID_PATH=//p' | head -1`
+		if [ -n "$dserial$dwwn" ] && [ -n "$dpath" ]; then
+			ident="${dserial}|${dwwn}|${dpath}"
+		else
+			ident=$1
+		fi
+	fi
 	echo -n "$ident" | md5sum | sed 's/^\(........\)\(....\)\(....\)\(....\)\(............\).*/\1-\2-\3-\4-\5/'
 }
 # setproduct <backstore name>: the SCSI product id the initiators see (lsscsi model column) is "<disk>-<host>", and
