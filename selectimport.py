@@ -9,7 +9,7 @@ from ast import literal_eval as mtuple
 #from zpooltoimport import zpooltoimport as importables
 
   
-def selecthost(minhost,hostname,hostpools):
+def selecthost(minhost,hostname,hostpools,poolhosts):
     """
     - if len(hostpools) > 1, what should be the correct behavior?
     - current solution worst case = O(n^3), but much faster in practice
@@ -27,14 +27,10 @@ def selecthost(minhost,hostname,hostpools):
     #print("DEBUG selecthost: hostpools:", hostpools)
     #print("DEBUG selecthost: len(hostpools):", len(hostpools))
 
-    has_disk_in_pool = False
-    for pool in hostpools:
-        for raid in pool.get('raidlist', []):
-            for disk in raid.get('disklist', []):
-                if hostname == disk.get('host'):
-                    has_disk_in_pool = True
-
-    if has_disk_in_pool:
+    # A standby must hold a disk of the pool it is to take over (it imports the pool from its own disks).  That is a property
+    # of the POOL (its owner's entry lists every disk with its host), not of the pools the candidate hosts itself: a node that
+    # hosts no pool has an empty list, so it could never be chosen, no standby was assigned and nothing failed over.
+    if hostname in poolhosts:
         if len(hostpools) < minhost[1]:
             minhost = (hostname, len(hostpools))
 
@@ -80,9 +76,23 @@ def selectimport(*args):
         #print("DEBUG selectimport: str(poolnxt): ", str(poolnxt))
         #print("DEBUG selectimport: poolnxt value:", poolnxt)
 
-        if 'dhcp' in str(poolnxt) or nhost == '_1' or chost == nhost:
+        # an empty assignment (nobody qualified at the time) is as good as none: it used to stay for ever, because only '_1',
+        # a host name or the owner itself triggered a new selection
+        if 'dhcp' in str(poolnxt) or nhost in ('_1', '') or chost == nhost:
             minhost = ('',float('inf'))
             #print("DEBUG selectimport: initial minhost: ", minhost)
+
+            # hosts that hold a disk of THIS pool, from the owner's entry of it
+            poolhosts = set()
+            for host in hosts:
+                if host[0].split('/')[1] != chost:
+                    continue
+                for hpool in mtuple(host[1]):
+                    if hpool.get('name') != pool:
+                        continue
+                    for raid in hpool.get('raidlist', []):
+                        for disk in raid.get('disklist', []):
+                            poolhosts.add(disk.get('host'))
 
             for host in hosts: 
                 hostname = host[0].split('/')[1]
@@ -95,7 +105,7 @@ def selectimport(*args):
                 hostpools=mtuple(host[1])
                 #print("DEBUG selectimport: hostpools after mtuple: ", hostpools)
 
-                minhost = selecthost(minhost,hostname,hostpools)
+                minhost = selecthost(minhost,hostname,hostpools,poolhosts)
                 #print("DEBUG selectimport: minhost after selecthost: ",minhost)
 
             dels(leaderip, 'sync/poolnxt/', pool)
