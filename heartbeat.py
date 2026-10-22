@@ -260,7 +260,7 @@ def heartbeat(*args):
             result = 'failed'
             tries = 0
             res = ''
-            while tries < 5:
+            while tries < 3:
                 tries +=1
                 try:
                     cmdline='nmap --max-rtt-timeout 500ms -n -p '+port+' '+hostip 
@@ -281,7 +281,7 @@ def heartbeat(*args):
                         result=(host,'lost')
                 if 'ok' in str(result):
                     break
-                sleep(2)
+                sleep(1)
             print(result)
             if 'ok' not in str(result):
                 with open('/root/heartproblem','a') as f:
