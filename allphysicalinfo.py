@@ -96,11 +96,32 @@ def getall(leadip, alldsks='0'):
    voldict['prot'] = 'ISCSI'
    volumesdict[voldict['name']] = voldict.copy()
  
+ # A pool can be listed in the snapshots of two nodes (the one that hosts it now and a stale one of the node that hosted it before,
+ # or of a node that was lost): the entry that was written last by putzpool (its 'timestamp') is the real one.  Before, the node name
+ # that sorted last won, so after a take over / node return the pool was shown on the wrong host and a pool delete was sent to a node
+ # that did not have the pool (it stayed behind as a zombie).  The free-disk pseudo pool 'pree' exists once per node and is kept.
+ newestpool = {}
+ for alldsk in alldsks:
+  if alldsk == '_1':
+   continue
+  try:
+   for pool in mtuple(alldsk[1]):
+    if str(pool['name']).startswith('pree'):
+     continue
+    try:
+     tsp = float(pool.get('timestamp', 0) or 0)
+    except (TypeError, ValueError):
+     tsp = 0.0
+    if pool['name'] not in newestpool or tsp > newestpool[pool['name']][0]:
+     newestpool[pool['name']] = (tsp, alldsk[0].split('/')[1])
+  except Exception:
+   pass
  for alldsk in alldsks:
   if alldsk == '_1':
    continue
   host = alldsk[0].split('/')[1]
   pools = mtuple(alldsk[1])
+  pools = [pl for pl in pools if str(pl['name']).startswith('pree') or newestpool.get(pl['name'], (0, host))[1] == host]
   hostpools = []
   thehostip = get(hostip,'ActivePartners/'+host)[0]
   hostsdict[host] = {'name': host,'ipaddress': thehostip, 'pools': hostpools }
