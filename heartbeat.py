@@ -92,11 +92,12 @@ def hostlost(host, hostip):
                 if host == leader:
                     dels(myhostip, 'pools',host)
                     dels(myhostip, 'vol',host)
-                    # the lost leader's own pool/disk snapshot: it used to stay in this node's etcd until hostlost.sh ran at the end of this
-                    # function, i.e. AFTER the new API was up, so for some seconds the API showed the dead node's disks as ONLINE and
-                    # the pool as 'highly available, balanced' (QC diskgroups_2nodes step 31).  Exact keys only.
-                    dels(myhostip, 'hosts/'+host+'/current')
-                    dels(myhostip, 'lists/'+host)
+                    # The lost leader's own pool/disk snapshot stays in etcd until hostlost.sh ran at the end of this function, i.e. AFTER the
+                    # new API was up: for some seconds the API showed the dead node's disks as ONLINE and the pool as 'highly available,
+                    # balanced'.  The import logic (selectimport / zpooltoimport) needs that snapshot to choose the node that imports the
+                    # pool, so it must not be deleted; it is only marked as stale: allphysicalinfo.getall ignores what the node published
+                    # before this mark.
+                    put(myhostip, 'deadsnap/'+host, str(stamp()))
                     print('leader lost. nextleader is ',nextleader, 'while my host',myhost)
                     nextleader, nextleaderip =  splitnext(get(etcd,'nextlead/er')[0])
                     if nextleader:

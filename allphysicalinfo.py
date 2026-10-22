@@ -100,6 +100,13 @@ def getall(leadip, alldsks='0'):
  # or of a node that was lost): the entry that was written last by putzpool (its 'timestamp') is the real one.  Before, the node name
  # that sorted last won, so after a take over / node return the pool was shown on the wrong host and a pool delete was sent to a node
  # that did not have the pool (it stayed behind as a zombie).  The free-disk pseudo pool 'pree' exists once per node and is kept.
+ deadsnap = {}
+ try:
+  for dk in get(hostip, 'deadsnap', '--prefix'):
+   if isinstance(dk, tuple) and len(dk) == 2:
+    deadsnap[dk[0].split('/')[1]] = float(dk[1])
+ except Exception:
+  deadsnap = {}
  newestpool = {}
  for alldsk in alldsks:
   if alldsk == '_1':
@@ -122,6 +129,9 @@ def getall(leadip, alldsks='0'):
   host = alldsk[0].split('/')[1]
   pools = mtuple(alldsk[1])
   pools = [pl for pl in pools if str(pl['name']).startswith('pree') or newestpool.get(pl['name'], (0, host))[1] == host]
+  if host in deadsnap:
+   # published before the node was found dead: stale (a node that came back publishes newer entries)
+   pools = [pl for pl in pools if float(pl.get('timestamp', 0) or 0) > deadsnap[host]]
   hostpools = []
   thehostip = get(hostip,'ActivePartners/'+host)[0]
   hostsdict[host] = {'name': host,'ipaddress': thehostip, 'pools': hostpools }
