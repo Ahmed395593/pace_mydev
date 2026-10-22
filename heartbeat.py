@@ -144,11 +144,13 @@ def selfregister():
     if not myhost or myhost == leader or not leaderip:
         return
     try:
-        active = str(get(leaderip, 'ActivePartners/' + myhost))
-        ready = str(get(leaderip, 'ready/' + myhost))
+        # the values are the node's ADDRESS ('10.11.11.27'), never its name: the old test 'myhost in str(...)' was always false for
+        # ActivePartners, so a node the leader had dropped (its etcd was down for a while) never registered itself again
+        active = get(leaderip, 'ActivePartners/' + myhost)[0]
+        ready = get(leaderip, 'ready/' + myhost)[0]
     except Exception:
         return
-    if myhost not in active or myhost in ready:
+    if str(active) in ('_1', '', 'None') or str(ready) not in ('_1', '', 'None'):
         return
     stampit = str(stamp())
     put(leaderip, 'ready/' + myhost, myhostip)
