@@ -107,6 +107,18 @@ def getall(leadip, alldsks='0'):
     deadsnap[dk[0].split('/')[1]] = float(dk[1])
  except Exception:
   deadsnap = {}
+ # dead hosts: marked by the heartbeat (deadsnap/<host>) or listed in the snapshots but not ready any more
+ deadhosts = dict(deadsnap)
+ try:
+  readyhosts = [rk[0].split('/')[1] for rk in get(hostip, 'ready', '--prefix') if isinstance(rk, tuple)]
+  if len(readyhosts) > 0:
+   for alldsk in alldsks:
+    if alldsk != '_1':
+     hname = alldsk[0].split('/')[1]
+     if hname not in readyhosts and hname not in deadhosts:
+      deadhosts[hname] = float(__import__('time').time())
+ except Exception:
+  pass
  newestpool = {}
  for alldsk in alldsks:
   if alldsk == '_1':
@@ -129,9 +141,26 @@ def getall(leadip, alldsks='0'):
   host = alldsk[0].split('/')[1]
   pools = mtuple(alldsk[1])
   pools = [pl for pl in pools if str(pl['name']).startswith('pree') or newestpool.get(pl['name'], (0, host))[1] == host]
-  if host in deadsnap:
-   # published before the node was found dead: stale (a node that came back publishes newer entries)
-   pools = [pl for pl in pools if float(pl.get('timestamp', 0) or 0) > deadsnap[host]]
+  if host in deadhosts:
+   # The node is dead (lost, or marked by the heartbeat as dead leader) and what it published is the last picture it had.  Showing it
+   # as it was ('online', 'balanced') is wrong, hiding the pool until the survivor has imported it (a few seconds) is wrong as well:
+   # the pool stays in the list as DEGRADED, the disks of the dead node as UNAVAIL ('missing disks'), until a newer entry of the node
+   # that took the pool over replaces it (newestpool above) or the node publishes again.  Its free disks are gone.
+   pools = [pl for pl in pools if not str(pl['name']).startswith('pree') and float(pl.get('timestamp', 0) or 0) <= deadhosts[host] + 1e9]
+   for pl in pools:
+    pl['status'] = 'DEGRADED'
+    pl['changeop'] = 'DEGRADED'
+    for rd in pl.get('raidlist', []):
+     missing = 0
+     for dk in rd.get('disklist', []):
+      if dk.get('host') == host:
+       dk['status'] = 'UNAVAIL'
+       dk['changeop'] = 'UNAVAIL'
+       missing += 1
+     if missing:
+      rd['status'] = 'DEGRADED'
+      rd['changeop'] = 'DEGRADED'
+      rd['missingdisks'] = [missing]
   hostpools = []
   thehostip = get(hostip,'ActivePartners/'+host)[0]
   hostsdict[host] = {'name': host,'ipaddress': thehostip, 'pools': hostpools }
