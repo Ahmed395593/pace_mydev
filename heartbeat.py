@@ -160,6 +160,27 @@ def selfregister():
         f.write('\nselfregister: ready/' + myhost + ' was missing on ' + leaderip + ', written again\n')
 
 
+def pullready():
+    # A node whose etcd was restarted (container died, disk full ...) registers itself on the leader again (selfregister), but its
+    # OWN etcd stays without the other nodes' ready/ActivePartners records -- nothing pushes them again.  With only itself in its
+    # local ready list the loop below says "only one host is running" and never notices the death of the leader: no take over.
+    # Copy what the leader has and the local etcd lacks.
+    global leader, leaderip, myhost, myhostip
+    if not myhost or myhost == leader or not leaderip:
+        return
+    try:
+        for prefix in ('ready', 'ActivePartners'):
+            lead = get(leaderip, prefix, '--prefix')
+            have = set(k[0] for k in get(myhostip, prefix, '--prefix') if isinstance(k, tuple))
+            for k in lead:
+                if isinstance(k, tuple) and len(k) == 2 and k[0] not in have:
+                    put(myhostip, k[0], k[1])
+                    with open('/root/heartproblem', 'a') as f:
+                        f.write('\npullready: ' + str(k[0]) + ' was missing in the local etcd, copied from the leader\n')
+    except Exception:
+        return
+
+
 def announceclusterip():
     global leader, myhost, leaderip
     if myhost != leader or not leaderip:
@@ -203,6 +224,7 @@ def heartbeat(*args):
         sleep(1)
         loopcount += 1
         if loopcount % 15 == 0:
+            pullready()
             selfregister()
         if loopcount % 20 == 0:
             announceclusterip()
