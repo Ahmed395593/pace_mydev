@@ -75,6 +75,8 @@ def followadminhash(leaderip, myhostip):
  the cluster when it became the leader.  Copy the leader's hash into this node's own etcd when it differs."""
  try:
   newhash = str(get(leaderip,'usershash/admin')[0]).replace('\n','')
+  if newhash not in ('_1','-1','','None') and len(newhash) > 3 and newhash != str(get(myhostip,'usershashadm/admin')[0]).replace('\n',''):
+   put(myhostip,'usershashadm/admin',newhash)     # the factory hash follows the cluster password (see UnixChkUser)
   if newhash not in ('_1','-1','','None') and len(newhash) > 3 and newhash != str(get(myhostip,'usershash/admin')[0]).replace('\n',''):
    put(myhostip,'usershash/admin',newhash)
    subprocess.run(['/TopStor/UnixChangePass','admin','admin'],stdout=subprocess.PIPE)
