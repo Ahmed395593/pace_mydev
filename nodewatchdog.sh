@@ -54,5 +54,19 @@ print("\n".join(o))' > /TopStordata/textfile/topstor.prom.tmp && mv /TopStordata
     mkdir -p /TopStordata/textfile
     docker run -d --restart unless-stopped -p $nip:9100:9100 -v /proc:/proc -v /sys:/sys -v /TopStordata/textfile:/textfile:ro --name promexport prom/node-exporter --collector.textfile.directory=/textfile >> $LOG 2>&1
   fi
+  # 5. replication ports: an sshd 'Port' line of the partner range 3001-8000 that no partner of this cluster uses any more
+  #    (the partner was deleted) is removed and sshd reloaded, so the port can be given to a partner again.
+  if [ "`docker exec etcdclient /TopStor/etcdgetlocal.py leader 2>/dev/null | grep -c dhcp`" -ge 1 ]; then
+    used=`docker exec etcdclient /TopStor/etcdgetlocal.py Partner --prefix 2>/dev/null | grep -o "/[0-9]*/" | tr -d '/' | sort -u`
+    for pt in `grep -o '^Port [0-9]*' /etc/ssh/sshd_config | awk '{print $2}' | sort -u`; do
+      [ "$pt" -ge 3001 ] && [ "$pt" -le 8000 ] || continue
+      echo "$used" | grep -qx "$pt" && continue
+      log "replication port $pt is not used by any partner any more: closing it in sshd"
+      cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.bak_port$pt
+      sed -i "/^Port $pt\b/d" /etc/ssh/sshd_config
+      firewall-cmd -q --permanent --remove-port=$pt/tcp 2>/dev/null; firewall-cmd -q --permanent --remove-port=$pt/udp 2>/dev/null; firewall-cmd -q --reload 2>/dev/null
+      sshd -t && systemctl reload sshd
+    done
+  fi
   sleep 20
 done

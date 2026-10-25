@@ -215,6 +215,39 @@ def syncall(leader,leaderip,myhost, myhostip,pullsync='pullavail'):
 
 
  return
+def groupmembers(value):
+ # usersigroup/<g> = <uid>:<gid>:nogrouphome/nogroupsize/<members>/...  -> set of member names
+ try:
+  return set(m for m in str(value).split('/')[2].split(',') if m and m != 'NoUser')
+ except Exception:
+  return set()
+
+def reconcilegroups(leaderip, pport):
+ try:
+  sender = getnoport(leaderip, pport, 'usersigroup', '--prefix')
+  local = get(leaderip, 'usersigroup', '--prefix')
+  if not sender or not isinstance(sender[0], tuple):
+   return
+  localmembers = dict((k[0], groupmembers(k[1])) for k in local if isinstance(k, tuple))
+  localusers = set(k[0].replace('usersinfo/','') for k in get(leaderip, 'usersinfo', '--prefix') if isinstance(k, tuple))
+  done = 0
+  for k in sender:
+   if not isinstance(k, tuple) or k[0].endswith('/Everyone'):
+    continue
+   want = groupmembers(k[1])
+   if k[0] in localmembers and want == localmembers[k[0]]:
+    continue
+   if not want.issubset(localusers):
+    continue        # a member is not here yet: the user sync comes first
+   g = k[0].replace('usersigroup/','')
+   print('reconcilegroups: members of', g, 'differ from the sender', sorted(want), sorted(localmembers.get(k[0], set())))
+   onegroupsync('Add', g, 'pullsync')
+   done += 1
+   if done >= 3:
+    break
+ except Exception as e:
+  print('reconcilegroups', e)
+
 def replisyncrequest(replirev, leader,leaderip,myhost, myhostip):
  global syncs, syncanitem, forReceivers, etcdonly,  allsyncs
  print('***************************************************************************')
@@ -383,6 +416,7 @@ def replisyncrequest(replirev, leader,leaderip,myhost, myhostip):
    if flag == 1 and evacuateflag == 0:
     print(';;;;;;;;;;;;;;;;;;;;updating the remote leader')
     putnoport(leaderip,pport,syncleft+'/dhcp'+myalias, stamp)
+ reconcilegroups(leaderip, pport)
  return     
 
 

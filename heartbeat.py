@@ -88,7 +88,7 @@ def hostlost(host, hostip):
                 stampit = str(stamp())
                 port = myport = '2379'
                 # from this node's own etcd: asking the lost leader's etcd only waited 2 s for the timeout and returned nothing
-                clusterip = get(etcd,'namespace/mgmtip')[0]
+                clusterip = get(myhostip if myhost != leader else etcd,'namespace/mgmtip')[0]
                 if host == leader:
                     dels(myhostip, 'pools',host)
                     dels(myhostip, 'vol',host)
@@ -99,10 +99,16 @@ def hostlost(host, hostip):
                     # before this mark.
                     put(myhostip, 'deadsnap/'+host, str(stamp()))
                     print('leader lost. nextleader is ',nextleader, 'while my host',myhost)
-                    nextleader, nextleaderip =  splitnext(get(etcd,'nextlead/er')[0])
+                    # a follower asks its own registry (the lost leader's, the cluster ip, does not answer); when the key cannot be
+                    # read now, the next leader that refreshrole() remembered while the leader was alive is used
+                    src = myhostip if myhost != host else etcd
+                    cachedh, cachedip = nextleader, nextleaderip
+                    nextleader, nextleaderip =  splitnext(get(src,'nextlead/er')[0])
+                    if not nextleader and cachedh:
+                        nextleader, nextleaderip = cachedh, cachedip
                     if nextleader:
                         if not nextleaderip:
-                            nextleaderip = myhostip if nextleader == myhost else str(get(etcd,'ready/'+nextleader)[0])
+                            nextleaderip = myhostip if nextleader == myhost else str(get(src,'ready/'+nextleader)[0])
                         leader = nextleader 
                         put(myhostip,'leader',leader)
                     if myhost == nextleader:
@@ -235,6 +241,30 @@ def announceclusterip():
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def refreshrole():
+    # the local registry is the truth for who leads: choose again which registry this node reads
+    global etcd, leader, leaderip, myhost, myhostip, nextleader, nextleaderip
+    try:
+        l =subprocess.run('docker exec etcdclient /TopStor/etcdgetlocal.py leader'.split(),stdout=subprocess.PIPE,timeout=20).stdout.decode('utf-8').replace('\n','').replace(' ','')
+        lip = subprocess.run('docker exec etcdclient /TopStor/etcdgetlocal.py leaderip'.split(),stdout=subprocess.PIPE,timeout=20).stdout.decode('utf-8').replace('\n','').replace(' ','')
+    except Exception:
+        return
+    if 'dhcp' not in l or '.' not in lip:
+        return
+    if l != leader or lip != leaderip:
+        with open('/root/heartproblem','a') as f:
+            f.write('\nrefreshrole: leader '+leader+' '+leaderip+' -> '+l+' '+lip+'\n')
+    leader, leaderip = l, lip
+    etcd = leaderip if myhost == leader else myhostip
+    # remember the next leader while the leader is alive: at its death the registry may be unreadable or miss the key
+    try:
+        nh, nip = splitnext(get(myhostip if myhost != leader else etcd, 'nextlead/er')[0])
+        if nh:
+            nextleader, nextleaderip = nh, nip
+    except Exception:
+        pass
+
+
 def heartbeat(*args):
     global etcd, leader ,leaderip, myhost, myhostip
     cmdline='docker exec etcdclient /TopStor/etcdgetlocal.py leader'
@@ -259,6 +289,7 @@ def heartbeat(*args):
         sleep(1)
         loopcount += 1
         if loopcount % 15 == 0:
+            refreshrole()
             pullready()
             selfregister()
         if loopcount % 30 == 0:
