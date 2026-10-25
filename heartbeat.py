@@ -187,6 +187,35 @@ def pullready():
         return
 
 
+def reconcileusers():
+    # A node that was down while users were created never got them: the sync/user requests are gone from the leader before the returned
+    # node looks at them (seen with 3 sudden deaths of QC users_2nodes_OneCluster: usr12, usr13 ... had no account on the returned node).
+    # Every non-leader node therefore compares the leader's user list with its own and creates what is missing (the same call the sync
+    # request would have made).  Only ADDS, never deletes; at most 3 users per round.
+    global leader, leaderip, myhost, myhostip
+    if not myhost or myhost == leader or not leaderip:
+        return
+    try:
+        lead = get(leaderip, 'usersinfo', '--prefix')
+        loc = get(myhostip, 'usersinfo', '--prefix')
+        if not lead or not isinstance(lead[0], tuple):
+            return
+        have = set(k[0] for k in loc if isinstance(k, tuple))
+        done = 0
+        for k in lead:
+            if not isinstance(k, tuple) or k[0] in have or 'NoUser' in k[0]:
+                continue
+            name = k[0].replace('usersinfo/', '')
+            with open('/root/heartproblem', 'a') as f:
+                f.write('\nreconcileusers: ' + name + ' exists on the leader and not here, creating it\n')
+            subprocess.run(['python3', '/pace/usersyncall.py', 'Add', name, 'pullavail'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
+            done += 1
+            if done >= 3:
+                break
+    except Exception:
+        return
+
+
 def announceclusterip():
     global leader, myhost, leaderip
     if myhost != leader or not leaderip:
@@ -232,6 +261,8 @@ def heartbeat(*args):
         if loopcount % 15 == 0:
             pullready()
             selfregister()
+        if loopcount % 30 == 0:
+            reconcileusers()
         if loopcount % 20 == 0:
             announceclusterip()
         tries = 0
