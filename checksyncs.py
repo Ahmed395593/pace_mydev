@@ -417,6 +417,11 @@ def replisyncrequest(replirev, leader,leaderip,myhost, myhostip):
     print(';;;;;;;;;;;;;;;;;;;;updating the remote leader')
     putnoport(leaderip,pport,syncleft+'/dhcp'+myalias, stamp)
  reconcilegroups(leaderip, pport)
+ # the admin password of the sending cluster logs in here too, also when it was set before the partnership
+ try:
+  pulladminhash('admin')
+ except Exception as e:
+  print('pulladminhash', e)
  return     
 
 
@@ -673,6 +678,10 @@ def syncrequest(leader,leaderip,myhost, myhostip,pullsync='pullavail'):
     if 'initial' not in prune:
         dels(leaderip,'sync',prune) 
   replirevs = get(leaderip,'replirev','--prefix')
+  # only for a sender partner that still exists: a left-over entry of a deleted partner pointed at a tunnel port that
+  # now leads somewhere else (two clusters then pulled each other's users and groups)
+  replirevs = [ r for r in replirevs if isinstance(r, tuple) and len(r[0].split('/')) > 2
+                and str(get(leaderip, 'Partner/'+r[0].split('/')[1])[0]) not in ('_1', '-1', '', 'None') ]
   print(replirevs)
   for replirev in replirevs:
      replisyncrequest(replirev,leader, leaderip, myhost, myhostip) 

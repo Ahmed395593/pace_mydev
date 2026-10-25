@@ -42,7 +42,19 @@ def thread_add(user,syncip, tosync='pullavail'):
  usergd=userinfo[1]
  usersplit = user[1].split('/')
  homePool = usersplit[1]
- usergroups = usersplit[2] 
+ usergroups = usersplit[2]
+ # the groups the user is a member of, from the registry the user comes from (the field above is only its own name)
+ try:
+  if 'pullsync' in tosync:
+   allgrps = getnoport(leaderip, pport, 'usersigroup', '--prefix')
+  else:
+   allgrps = get(leaderip, 'usersigroup', '--prefix')
+  member = [ g[0].replace('usersigroup/','') for g in allgrps if isinstance(g, tuple) and not g[0].endswith('/Everyone')
+             and username in str(g[1]).split('/')[2].split(',') ]
+  if member:
+   usergroups = ','.join(member)
+ except Exception as e:
+  print('groups of', username, e)
  userpass = userhash
  size = usersplit[3]
  HomeAddr = usersplit[-3]
