@@ -107,16 +107,28 @@ def getall(leadip, alldsks='0'):
     deadsnap[dk[0].split('/')[1]] = float(dk[1])
  except Exception:
   deadsnap = {}
- # dead hosts: marked by the heartbeat (deadsnap/<host>) or listed in the snapshots but not ready any more
- deadhosts = dict(deadsnap)
+ # Dead hosts: (gone) not in the ready list any more; (marked) found dead by the heartbeat (deadsnap/<host>, written when the leader is lost,
+ # BEFORE the ready list is cleaned) less than 5 minutes ago and not published since the mark.  A node that came back publishes newer
+ # entries, so an old mark never matters.
+ gone = {}
+ marked = {}
  try:
   readyhosts = [rk[0].split('/')[1] for rk in get(hostip, 'ready', '--prefix') if isinstance(rk, tuple)]
-  if len(readyhosts) > 0:
-   for alldsk in alldsks:
-    if alldsk != '_1':
-     hname = alldsk[0].split('/')[1]
-     if hname not in readyhosts and hname not in deadhosts:
-      deadhosts[hname] = float(__import__('time').time())
+  nowts = float(__import__('time').time())
+  for alldsk in alldsks:
+   if alldsk == '_1':
+    continue
+   hname = alldsk[0].split('/')[1]
+   if len(readyhosts) > 0 and hname not in readyhosts:
+    gone[hname] = nowts
+    continue
+   if hname in deadsnap and nowts - deadsnap[hname] < 300:
+    try:
+     latest = max([float(pl.get('timestamp', 0) or 0) for pl in mtuple(alldsk[1]) if not str(pl['name']).startswith('pree')] or [0.0])
+    except Exception:
+     latest = 0.0
+    if latest < deadsnap[hname]:
+     marked[hname] = deadsnap[hname]
  except Exception:
   pass
  newestpool = {}
@@ -141,13 +153,13 @@ def getall(leadip, alldsks='0'):
   host = alldsk[0].split('/')[1]
   pools = mtuple(alldsk[1])
   pools = [pl for pl in pools if str(pl['name']).startswith('pree') or newestpool.get(pl['name'], (0, host))[1] == host]
-  if host in deadhosts:
-   # The node is dead (lost, or marked by the heartbeat as dead leader) and what it published is the last picture it had.  Showing it
-   # as it was ('online', 'balanced') is wrong, hiding the pool until the survivor has imported it (a few seconds) is wrong as well:
-   # the pool stays in the list as DEGRADED, the disks of the dead node as UNAVAIL ('missing disks'), until a newer entry of the node
-   # that took the pool over replaces it (newestpool above) or the node publishes again.  Its free disks are gone.
-   pools = [pl for pl in pools if not str(pl['name']).startswith('pree') and float(pl.get('timestamp', 0) or 0) <= deadhosts[host] + 1e9]
-   for pl in pools:
+  if host in gone or host in marked:
+   # The node is dead and what it published is the last picture it had.  Showing it as it was ('online', 'balanced') is wrong, hiding
+   # the pool until the survivor has imported it (a few seconds) is wrong as well: the pool stays listed as DEGRADED, the disks of the
+   # dead node as UNAVAIL ('missing disks'), until a newer entry of the node that took the pool over replaces it (newestpool above).
+   # The free disks of a lost node are gone; a node that is only marked still has its ready entry, its free disks stay.
+   pools = [pl for pl in pools if not (str(pl['name']).startswith('pree') and host in gone)]
+   for pl in [x for x in pools if not str(x['name']).startswith('pree')]:
     pl['status'] = 'DEGRADED'
     pl['changeop'] = 'DEGRADED'
     for rd in pl.get('raidlist', []):
