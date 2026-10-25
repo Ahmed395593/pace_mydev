@@ -44,5 +44,15 @@ o=["# TYPE topstor_users gauge","topstor_users %d" % d["users"],"# TYPE topstor_
 o+=["topstor_volumes{type=\"%s\"} %d" % (k,v) for k,v in sorted(d["volumes"].items())]
 print("\n".join(o))' > /TopStordata/textfile/topstor.prom.tmp && mv /TopStordata/textfile/topstor.prom.tmp /TopStordata/textfile/topstor.prom
   fi
+  # 4. node exporter (Prometheus data of this node for the Performance page): it vanished from a node 2 minutes after a boot, with no
+  #    trace of who stopped it; the page then showed one node only.  Start it again whenever it is not running.
+  if systemctl is-active --quiet docker && [ `cut -d. -f1 /proc/uptime` -gt 240 ] && ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx promexport \
+     && docker image inspect prom/node-exporter >/dev/null 2>&1; then
+    nip=`nmcli -g ipv4.addresses conn show cmynode | cut -d, -f1 | cut -d/ -f1`
+    log "node exporter not running: starting it on $nip"
+    docker rm -f promexport >/dev/null 2>&1
+    mkdir -p /TopStordata/textfile
+    docker run -d --restart unless-stopped -p $nip:9100:9100 -v /proc:/proc -v /sys:/sys -v /TopStordata/textfile:/textfile:ro --name promexport prom/node-exporter --collector.textfile.directory=/textfile >> $LOG 2>&1
+  fi
   sleep 20
 done
