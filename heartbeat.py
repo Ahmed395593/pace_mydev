@@ -153,7 +153,19 @@ def hostlost(host, hostip):
 # QCFIX: re-register this node on the leader when its ready/<host> key was lost, and announce the cluster ip
 def selfregister():
     global leader, leaderip, myhost, myhostip
-    if not myhost or myhost == leader or not leaderip:
+    if not myhost or not leaderip:
+        return
+    if myhost == leader:
+        # the leader registers itself again too: a hostlost of the other node (after a split) can delete ready/<leader>
+        try:
+            ready = get(leaderip, 'ready/' + myhost)[0]
+        except Exception:
+            return
+        if str(ready) in ('_1', '', 'None'):
+            put(leaderip, 'ready/' + myhost, myhostip)
+            put(leaderip, 'ActivePartners/' + myhost, myhostip)
+            with open('/root/heartproblem', 'a') as f:
+                f.write('\nselfregister: ready/' + myhost + ' (the leader) was missing on ' + leaderip + ', written again\n')
         return
     try:
         # the values are the node's ADDRESS ('10.11.11.27'), never its name: the old test 'myhost in str(...)' was always false for
