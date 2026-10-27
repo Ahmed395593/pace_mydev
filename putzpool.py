@@ -423,6 +423,10 @@ def initputzpool(*args):
         leaderip = args[1]
         myhost = args[2]
         myip = args[3]
+    # never report under '_1': a failed etcd lookup of the host name gave hosts/_1/current, which nothing removes
+    if str(myhost).strip() in ('_1', '-1', '', 'None'):
+        from socket import gethostname
+        myhost = gethostname()
     if leader == myhost:
         myip = leaderip
     initqueue(leaderip, myhost)

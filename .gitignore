@@ -1,1 +1,4 @@
 quickstor-ui.tar.gz
+
+# lab backup copies of patched files
+*.bak_*
